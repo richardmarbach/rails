@@ -489,6 +489,35 @@ module ActiveRecord
           ActiveRecord::Base.establish_connection :arunit
         end
       end
+
+      def test_dynamically_connecting_to_new_shards_is_thread_safe
+        previous_env, ENV["RAILS_ENV"] = ENV["RAILS_ENV"], "default_env"
+
+        config = {}
+
+        @prev_configs, ActiveRecord::Base.configurations = ActiveRecord::Base.configurations, config
+
+        # emulate a lot of open connections
+        1000.times do |i|
+          PrimaryBase.connects_to(shards: { "shard_#{i}" => { writing: "sqlite3::memory:" } })
+        end
+
+        thread = Thread.new do
+          1000.times do
+            ActiveRecord.all_open_transactions
+          end
+        end
+
+        1000.times do |i|
+          assert_nothing_raised { PrimaryBase.connects_to(shards: { "shard_t#{i}" => { writing: "sqlite3::memory:" } }) }
+        end
+
+        thread.join
+      ensure
+        ActiveRecord::Base.configurations = @prev_configs
+        ActiveRecord::Base.establish_connection(:arunit)
+        ENV["RAILS_ENV"] = previous_env
+      end
     end
   end
 end
